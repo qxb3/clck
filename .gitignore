@@ -1,0 +1,23 @@
+# Rust build artefacts
+/target/
+
+# Android build output (native libs, APKs, debug keystore)
+/build/
+*.apk
+*.aab
+
+# Project-local SDK, emulator, AVD and AVD data
+/.android/
+/.android-sdk/
+
+# Emulator runtime output
+/.emulator.log
+/.emulator.pid
+*.log
+
+# Editor / OS noise
+/.idea/
+*.iml
+*.swp
+*~
+.DS_Store
