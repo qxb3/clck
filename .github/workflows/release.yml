@@ -23,9 +23,13 @@ jobs:
 
       - name: Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default packages include the obsolete `tools`
+          # package, which no longer exists in the SDK repository.
+          packages: platform-tools
 
       - name: Android packages
-        run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "ndk;26.3.11579264"
+        run: yes | sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "ndk;26.3.11579264"
 
       - name: Rust targets
         uses: dtolnay/rust-toolchain@stable
