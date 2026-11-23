@@ -849,7 +849,7 @@ pub fn android_main(app: AndroidApp) {
             android_log(&format!("clock offset {offset}s"));
         }
         let now = clock::now_in(tz, offset);
-        let hour = now.hour.to_string();
+        let hour = format!("{:02}", now.hour);
         let minute = format!("{:02}", now.minute);
         let anim = clock_anim
             .get_or_insert_with(|| anim::ClockAnim::new(&hour, &minute, now.period(), &now.date));
