@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Minimal clock face: thin ring, two hands, teal second hand for the accent. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:pathData="M54,28 A26,26 0 1 1 54,80 A26,26 0 1 1 54,28"
+        android:fillColor="#00000000"
+        android:strokeColor="#c1c1c1"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <path
+        android:pathData="M54,54 L54,38"
+        android:fillColor="#00000000"
+        android:strokeColor="#c1c1c1"
+        android:strokeWidth="3.4"
+        android:strokeLineCap="round" />
+
+    <path
+        android:pathData="M54,54 L67,62"
+        android:fillColor="#00000000"
+        android:strokeColor="#c1c1c1"
+        android:strokeWidth="3.4"
+        android:strokeLineCap="round" />
+
+    <path
+        android:pathData="M54,54 L42,68"
+        android:fillColor="#00000000"
+        android:strokeColor="#5f8787"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round" />
+</vector>

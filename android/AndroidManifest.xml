@@ -3,6 +3,7 @@
 
     <application
         android:hasCode="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="clck"
         android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
 

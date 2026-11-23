@@ -23,6 +23,12 @@ for target in $TARGETS; do
     cp "$ROOT/target/$target/release/libmain.so" "$STAGE/lib/$abi/libmain.so"
 done
 
+echo "==> aapt2 compile"
+rm -f "$BUILD/res.zip"
+"$ANDROID_HOME/build-tools/34.0.0/aapt2" compile \
+    --dir "$ROOT/android/res" \
+    -o "$BUILD/res.zip"
+
 echo "==> aapt2 link"
 rm -f "$BUILD/base.apk" "$BUILD/aligned.apk"
 "$ANDROID_HOME/build-tools/34.0.0/aapt2" link \
@@ -32,7 +38,8 @@ rm -f "$BUILD/base.apk" "$BUILD/aligned.apk"
     --min-sdk-version 26 \
     --target-sdk-version 34 \
     --version-code 1 \
-    --version-name 0.1.0
+    --version-name 0.1.0 \
+    "$BUILD/res.zip"
 
 echo "==> package native libraries"
 (cd "$STAGE" && zip -q -r "$BUILD/base.apk" lib)

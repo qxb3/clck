@@ -11,6 +11,7 @@ with the grid sliding sideways as it changes.
 
 ![screenshot](docs/screenshot.png)
 ![calendar](docs/calendar.png)
+![icon](docs/icon.png)
 
 ## Palette
 
@@ -48,6 +49,8 @@ Taken from `~/.config/kitty/theme.conf` (base16 Black Metal / Gorgoroth):
   Android property `persist.sys.timezone` (native activities don't get `TZ`).
 - `assets/fonts/` — Iosevka Light, subset to printable ASCII (~11 KB).
 - `android/AndroidManifest.xml` — `android.app.NativeActivity`, `hasCode=false`.
+- `android/res/` — adaptive launcher icon: black background, thin `#c1c1c1`
+  ring and hands, one teal `#5f8787` second hand for the AM/PM accent.
 
 Everything Android (SDK, NDK, AVD, screenshots) lives inside this directory and
 is git-ignored.
