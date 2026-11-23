@@ -75,7 +75,8 @@ scripts/build-apk.sh                       # x86_64 (emulator) + arm64-v8a
 TARGETS=x86_64-linux-android scripts/build-apk.sh   # emulator only, faster
 ```
 
-Output: `build/clck.apk`, signed with a generated debug key.
+Output: `build/clck.apk`, signed with a generated debug key for local builds.
+Set `KEYSTORE`, `KEYSTORE_PASS` and `KEY_ALIAS` to sign with a real key instead.
 `scripts/build-releases.sh` builds one single-ABI APK per architecture into
 `build/dist/`.
 
@@ -93,6 +94,34 @@ git push origin v1.0.0
 Assets are `clck-arm64-v8a.apk`, `clck-armeabi-v7a.apk`, `clck-x86.apk` and
 `clck-x86_64.apk`. The tag without its `v` becomes `versionName`, and
 `versionCode` is derived as `major*10000 + minor*100 + patch`.
+
+### Signing key
+
+Android only installs an update when it is signed with the same key as the
+installed copy, so every release is signed with one persistent key. CI reads it
+from two repository secrets (alias `release`):
+
+| secret | contents |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | a PKCS12 keystore, base64-encoded |
+| `ANDROID_KEYSTORE_PASSWORD` | its store/key password |
+
+Create the key once, back it up (losing it means no more updates), and upload
+it:
+
+```sh
+PASS="$(openssl rand -base64 24)"
+keytool -genkeypair -keystore release.keystore -storetype PKCS12 \
+    -alias release -keyalg RSA -keysize 2048 -validity 10000 \
+    -storepass "$PASS" -keypass "$PASS" -dname "CN=clck,O=clck,C=US"
+base64 -w0 release.keystore > release.keystore.b64   # macOS: base64 -i
+gh secret set ANDROID_KEYSTORE_BASE64 < release.keystore.b64
+gh secret set ANDROID_KEYSTORE_PASSWORD --body "$PASS"
+```
+
+The release workflow fails with a clear error when the secrets are missing.
+Releases up to `v0.1.1` used throwaway CI keys, so a device running one of them
+needs a single uninstall before installing a consistently signed build.
 
 ## Run / test
 

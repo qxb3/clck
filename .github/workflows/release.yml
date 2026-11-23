@@ -46,7 +46,21 @@ jobs:
           echo "VERSION_NAME=$tag" >> "$GITHUB_ENV"
           echo "VERSION_CODE=$((10#$major * 10000 + 10#$minor * 100 + 10#$patch))" >> "$GITHUB_ENV"
 
+      - name: Signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not set. Add the release keystore (base64) and its password as repository secrets so every release is signed with the same key."
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+
       - name: Build APKs
+        env:
+          KEYSTORE: ${{ runner.temp }}/release.keystore
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: release
         run: scripts/build-releases.sh
 
       - name: Release

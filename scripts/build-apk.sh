@@ -52,13 +52,19 @@ echo "==> package native libraries"
 echo "==> zipalign"
 "$ANDROID_HOME/build-tools/34.0.0/zipalign" -f -p 4 "$BUILD/base.apk" "$BUILD/aligned.apk"
 
-KEYSTORE="$BUILD/debug.keystore"
+# Release builds pass in a persistent keystore so every APK is signed with the
+# same key and can update an installed copy. Local builds fall back to a
+# generated debug key.
+KEYSTORE="${KEYSTORE:-$BUILD/debug.keystore}"
+KEYSTORE_PASS="${KEYSTORE_PASS:-android}"
+KEY_ALIAS="${KEY_ALIAS:-androiddebugkey}"
+
 if [ ! -f "$KEYSTORE" ]; then
     echo "==> generating debug keystore"
     keytool -genkeypair \
         -keystore "$KEYSTORE" \
-        -storepass android -keypass android \
-        -alias androiddebugkey \
+        -storepass "$KEYSTORE_PASS" -keypass "$KEYSTORE_PASS" \
+        -alias "$KEY_ALIAS" \
         -keyalg RSA -keysize 2048 -validity 10000 \
         -dname "CN=Android Debug,O=Android,C=US" >/dev/null 2>&1
 fi
@@ -67,8 +73,9 @@ echo "==> sign"
 rm -f "$APK"
 "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign \
     --ks "$KEYSTORE" \
-    --ks-pass pass:android \
-    --key-pass pass:android \
+    --ks-pass "pass:$KEYSTORE_PASS" \
+    --key-pass "pass:$KEYSTORE_PASS" \
+    --ks-key-alias "$KEY_ALIAS" \
     --out "$APK" \
     "$BUILD/aligned.apk"
 
