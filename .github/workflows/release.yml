@@ -1,0 +1,53 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Android packages
+        run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "ndk;26.3.11579264"
+
+      - name: Rust targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Version from tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          IFS=. read -r major minor patch <<< "$tag"
+          [[ $major =~ ^[0-9]+$ ]] || major=0
+          [[ $minor =~ ^[0-9]+$ ]] || minor=0
+          [[ $patch =~ ^[0-9]+$ ]] || patch=0
+          echo "VERSION_NAME=$tag" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$((10#$major * 10000 + 10#$minor * 100 + 10#$patch))" >> "$GITHUB_ENV"
+
+      - name: Build APKs
+        run: scripts/build-releases.sh
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/dist/*.apk
+          generate_release_notes: false
+          fail_on_unmatched_files: true

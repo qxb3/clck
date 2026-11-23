@@ -76,6 +76,23 @@ TARGETS=x86_64-linux-android scripts/build-apk.sh   # emulator only, faster
 ```
 
 Output: `build/clck.apk`, signed with a generated debug key.
+`scripts/build-releases.sh` builds one single-ABI APK per architecture into
+`build/dist/`.
+
+## Releases
+
+Pushing a `v*` tag builds one APK per Android ABI and publishes them as a
+GitHub release with no release notes:
+
+```sh
+scripts/build-releases.sh   # locally: build/dist/clck-<arch>.apk
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Assets are `clck-arm64-v8a.apk`, `clck-armeabi-v7a.apk`, `clck-x86.apk` and
+`clck-x86_64.apk`. The tag without its `v` becomes `versionName`, and
+`versionCode` is derived as `major*10000 + minor*100 + patch`.
 
 ## Run / test
 

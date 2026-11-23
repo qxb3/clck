@@ -4,6 +4,9 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 
 TARGETS="${TARGETS:-x86_64-linux-android aarch64-linux-android}"
+# Release builds pass these in from the git tag.
+VERSION_NAME="${VERSION_NAME:-0.1.0}"
+VERSION_CODE="${VERSION_CODE:-1}"
 BUILD="$ROOT/build"
 STAGE="$BUILD/stage"
 
@@ -15,6 +18,8 @@ for target in $TARGETS; do
     case "$target" in
         x86_64-linux-android) abi="x86_64" ;;
         aarch64-linux-android) abi="arm64-v8a" ;;
+        armv7-linux-androideabi) abi="armeabi-v7a" ;;
+        i686-linux-android) abi="x86" ;;
         *) echo "unsupported target: $target" >&2; exit 1 ;;
     esac
     echo "==> cargo build --release --target $target"
@@ -37,8 +42,8 @@ rm -f "$BUILD/base.apk" "$BUILD/aligned.apk"
     --manifest "$ROOT/android/AndroidManifest.xml" \
     --min-sdk-version 26 \
     --target-sdk-version 34 \
-    --version-code 1 \
-    --version-name 0.1.0 \
+    --version-code "$VERSION_CODE" \
+    --version-name "$VERSION_NAME" \
     "$BUILD/res.zip"
 
 echo "==> package native libraries"
