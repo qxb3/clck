@@ -1,8 +1,6 @@
 # clck
 
-Minimal landscape clock for Android tablets: big 12-hour time with the date
-below it, and a month calendar on the second page (swipe left). Rust with
-`NativeActivity`, no Java/Kotlin and no Gradle.
+A minimalistic clock app.
 
 ![screenshot](docs/screenshot.png)
 ![calendar](docs/calendar.png)
