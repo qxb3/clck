@@ -439,11 +439,11 @@ unsafe fn draw_time_page(
         now,
     );
 
-    // Date along the bottom, rolling the same way when the day changes.
+    // Date just under the time, rolling the same way when the day changes.
     let date_px = (hf * 0.052).clamp(13.0, 48.0);
     let date_tracking = date_px * 0.16;
     let date_w = text.measure(&anim.date.text, date_px, date_tracking);
-    let date_baseline = hf * 0.895 + text.centre_offset('0', date_px);
+    let date_baseline = baseline + px * 0.3 + text.centre_offset('0', date_px);
     let date_clip = [
         0.0,
         date_baseline - date_px * 1.05,
@@ -668,6 +668,105 @@ unsafe fn draw(
     true
 }
 
+// --- immersive mode ----------------------------------------------------------
+
+/// Hides the status and navigation bars. `FULLSCREEN` only covers the status
+/// bar, so the tablet's navigation buttons have to be hidden through the
+/// activity window: `WindowInsetsController` on API 30+, the legacy system UI
+/// flags before that. Runs on the Java main thread because it touches views.
+#[cfg(target_os = "android")]
+fn hide_system_bars(app: &AndroidApp) {
+    let task_app = app.clone();
+    app.run_on_java_main_thread(Box::new(move || {
+        let vm = unsafe { jni::JavaVM::from_raw(task_app.vm_as_ptr().cast()) };
+        let activity_raw = task_app.activity_as_ptr() as jni::sys::jobject;
+        let result = vm.attach_current_thread(|env| -> jni::errors::Result<()> {
+            use jni::{jni_sig, jni_str, objects::JObject, JValue};
+
+            // Unowned global reference; valid while `app` is alive.
+            let activity = unsafe { JObject::from_raw(env, activity_raw) };
+            let window = env
+                .call_method(
+                    &activity,
+                    jni_str!("getWindow"),
+                    jni_sig!("()Landroid/view/Window;"),
+                    &[],
+                )?
+                .l()?;
+
+            let sdk = android_properties::getprop("ro.build.version.sdk")
+                .value()
+                .and_then(|v| v.trim().parse::<i32>().ok())
+                .unwrap_or(26);
+
+            if sdk >= 30 {
+                // Let the window extend behind the bars, then hide them with
+                // transient bars revealed only by a swipe.
+                env.call_method(
+                    &window,
+                    jni_str!("setDecorFitsSystemWindows"),
+                    jni_sig!("(Z)V"),
+                    &[JValue::Bool(false)],
+                )?;
+                let controller = env
+                    .call_method(
+                        &window,
+                        jni_str!("getInsetsController"),
+                        jni_sig!("()Landroid/view/WindowInsetsController;"),
+                        &[],
+                    )?
+                    .l()?;
+                // WindowInsets.Type.systemBars() = statusBars | navigationBars | captionBar.
+                const SYSTEM_BARS: i32 = 0x1 | 0x2 | 0x4;
+                const BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE: i32 = 2;
+                env.call_method(
+                    &controller,
+                    jni_str!("hide"),
+                    jni_sig!("(I)V"),
+                    &[JValue::Int(SYSTEM_BARS)],
+                )?;
+                env.call_method(
+                    &controller,
+                    jni_str!("setSystemBarsBehavior"),
+                    jni_sig!("(I)V"),
+                    &[JValue::Int(BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE)],
+                )?;
+            } else {
+                let decor = env
+                    .call_method(
+                        &window,
+                        jni_str!("getDecorView"),
+                        jni_sig!("()Landroid/view/View;"),
+                        &[],
+                    )?
+                    .l()?;
+                const IMMERSIVE_STICKY: i32 = 0x1000;
+                const HIDE_NAVIGATION: i32 = 0x2;
+                const FULLSCREEN: i32 = 0x4;
+                const LAYOUT_STABLE: i32 = 0x100;
+                const LAYOUT_HIDE_NAVIGATION: i32 = 0x200;
+                const LAYOUT_FULLSCREEN: i32 = 0x400;
+                let flags = IMMERSIVE_STICKY
+                    | HIDE_NAVIGATION
+                    | FULLSCREEN
+                    | LAYOUT_STABLE
+                    | LAYOUT_HIDE_NAVIGATION
+                    | LAYOUT_FULLSCREEN;
+                env.call_method(
+                    &decor,
+                    jni_str!("setSystemUiVisibility"),
+                    jni_sig!("(I)V"),
+                    &[JValue::Int(flags)],
+                )?;
+            }
+            Ok(())
+        });
+        if let Err(err) = result {
+            android_log(&format!("immersive mode failed: {err:?}"));
+        }
+    }));
+}
+
 // --- entry point -------------------------------------------------------------
 
 #[cfg(target_os = "android")]
@@ -684,6 +783,7 @@ pub fn android_main(app: AndroidApp) {
         )
     };
     keep_awake();
+    hide_system_bars(&app);
 
     let tz = clock::android_timezone();
 
@@ -739,6 +839,7 @@ pub fn android_main(app: AndroidApp) {
         // lifecycle transitions, so put them back whenever we are (re)shown.
         if reassert_awake {
             keep_awake();
+            hide_system_bars(&app);
             reassert_awake = false;
         }
 

@@ -1,6 +1,6 @@
 [package]
 name = "clck"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 publish = false
 
@@ -16,6 +16,7 @@ chrono-tz = "0.10"
 android-activity = { version = "0.6", features = ["native-activity"] }
 android-properties = "0.2"
 glow = "0.16"
+jni = "0.22"
 fontdue = { version = "0.9", default-features = false, features = ["std", "simd", "hashbrown"] }
 
 [profile.release]
