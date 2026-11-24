@@ -939,10 +939,12 @@ pub fn android_main(app: AndroidApp) {
                 if let Some(window) = app.native_window() {
                     let ptr = window.ptr().as_ptr() as EglHandle;
                     surface = Surface::create(ptr);
-                    if text.is_none() {
-                        if let Some(s) = surface.as_ref() {
-                            text = Some(text::TextRenderer::new(&s.gl, FONT));
-                        }
+                    // The old TextRenderer's GL objects (shaders, textures, VAOs)
+                    // belonged to the previous EGL context, which is gone along
+                    // with the previous surface. It must be rebuilt against the
+                    // new context, not just created once on first run.
+                    if let Some(s) = surface.as_ref() {
+                        text = Some(text::TextRenderer::new(&s.gl, FONT));
                     }
                 }
             }
