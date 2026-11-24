@@ -5,6 +5,7 @@
 mod anim;
 mod calendar;
 mod clock;
+mod counter;
 mod pager;
 
 #[cfg(target_os = "android")]
@@ -627,12 +628,40 @@ unsafe fn draw_calendar_page(
     ];
 }
 
+/// Tap counter: the count, centred, in the clock's colour.
+#[cfg(target_os = "android")]
+unsafe fn draw_counter_page(
+    text: &mut text::TextRenderer,
+    gl: &glow::Context,
+    counter: &counter::Counter,
+    wf: f32,
+    hf: f32,
+    dx: f32,
+) {
+    let px = (hf * 0.44).min(wf * 0.26);
+    let tracking = px * 0.02;
+    let baseline = hf * 0.47 + text.centre_offset('0', px);
+    let full = [0.0, 0.0, wf, hf];
+    draw_centered(
+        text,
+        gl,
+        &counter.count().to_string(),
+        wf * 0.5 + dx,
+        baseline,
+        px,
+        tracking,
+        TIME_COLOR,
+        full,
+    );
+}
+
 #[cfg(target_os = "android")]
 unsafe fn draw(
     surface: &Surface,
     text: &mut text::TextRenderer,
     calendar: &calendar::Calendar,
     anim: &anim::ClockAnim,
+    counter: &counter::Counter,
     pos: f32,
     now: Instant,
     buttons: &mut CalendarButtons,
@@ -644,13 +673,21 @@ unsafe fn draw(
     let (wf, hf) = (w as f32, h as f32);
 
     text.begin(&surface.gl, w, h, BG);
+    draw_counter_page(
+        text,
+        &surface.gl,
+        counter,
+        wf,
+        hf,
+        pager::page_offset(-1.0, pos, wf),
+    );
     draw_time_page(
         text,
         &surface.gl,
         anim,
         wf,
         hf,
-        pager::page_offset(0, pos, wf),
+        pager::page_offset(0.0, pos, wf),
         now,
     );
     draw_calendar_page(
@@ -659,7 +696,7 @@ unsafe fn draw(
         calendar,
         wf,
         hf,
-        pager::page_offset(1, pos, wf),
+        pager::page_offset(1.0, pos, wf),
         now,
         buttons,
     );
@@ -788,6 +825,7 @@ pub fn android_main(app: AndroidApp) {
     let tz = clock::android_timezone();
 
     let mut pager = pager::Pager::new();
+    let mut counter = counter::Counter::new();
     let mut surface: Option<Surface> = None;
     let mut text: Option<text::TextRenderer> = None;
     let mut last_stamp: Option<(u32, u32, String)> = None;
@@ -893,17 +931,21 @@ pub fn android_main(app: AndroidApp) {
                             }
                             MotionAction::Move => pager.drag_to(x, width),
                             MotionAction::Up => {
-                                pager.end_drag(x, width, now);
-                                if let Some((sx, sy)) = tap_origin.take() {
-                                    let is_tap = (x - sx).abs() < 24.0 && (y - sy).abs() < 24.0;
-                                    if is_tap && pager.pos() > 0.98 {
-                                        if hit(buttons.prev, x, y) {
-                                            cal.shift(-1, now);
-                                        } else if hit(buttons.next, x, y) {
-                                            cal.shift(1, now);
+                                    let was_tap = tap_origin.take().is_some_and(|(sx, sy)| {
+                                        (x - sx).abs() < 24.0 && (y - sy).abs() < 24.0 && !pager.was_swipe(width)
+                                    });
+                                    if was_tap {
+                                        if pager.pos() < -0.98 {
+                                            counter.increment();
+                                        } else if pager.pos() > 0.98 {
+                                            if hit(buttons.prev, x, y) {
+                                                cal.shift(-1, now);
+                                            } else if hit(buttons.next, x, y) {
+                                                cal.shift(1, now);
+                                            }
                                         }
                                     }
-                                }
+                                    pager.end_drag(x, width, now);
                             }
                             MotionAction::Cancel => {
                                 tap_origin = None;
@@ -950,7 +992,7 @@ pub fn android_main(app: AndroidApp) {
             }
 
             if let (Some(s), Some(t)) = (surface.as_ref(), text.as_mut()) {
-                if draw(s, t, cal, anim, pager.pos(), Instant::now(), &mut buttons) {
+                if draw(s, t, cal, anim, &counter, pager.pos(), Instant::now(), &mut buttons) {
                     dirty = false;
                     anim.prune(Instant::now());
                     cal.settle(Instant::now());
