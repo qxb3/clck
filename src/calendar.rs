@@ -54,6 +54,26 @@ impl Calendar {
         });
     }
 
+    /// Slides straight back to the current month, in whichever direction it lies.
+    pub fn jump_to_today(&mut self, now: Instant) {
+        let (year, month, day) = self.today;
+        if (self.view.year, self.view.month) == (year, month) {
+            return;
+        }
+        let dir = if (year, month) > (self.view.year, self.view.month) {
+            1
+        } else {
+            -1
+        };
+        let next = clock::month_view_for(year, month, Some(day));
+        let prev = std::mem::replace(&mut self.view, next);
+        self.slide = Some(Slide {
+            prev,
+            started: now,
+            dir: dir as f32,
+        });
+    }
+
     pub fn animating(&self) -> bool {
         self.slide.is_some()
     }
@@ -130,6 +150,31 @@ mod tests {
         cal.shift(-1, done);
         assert_eq!(cal.view().title, "NOVEMBER 2026");
         assert_eq!(cal.view().today, Some(23));
+    }
+
+    #[test]
+    fn jump_to_today_returns_from_another_month() {
+        let now = Instant::now();
+        let mut cal = Calendar::new(&clock_at(2026, 11, 23));
+        cal.shift(1, now);
+        cal.shift(1, now);
+        assert_eq!(cal.view().title, "JANUARY 2027");
+
+        cal.jump_to_today(now);
+        assert_eq!(cal.view().title, "NOVEMBER 2026");
+        assert_eq!(cal.view().today, Some(23));
+        let (_, prev, dir) = cal.slide(now).unwrap();
+        assert_eq!(prev.title, "JANUARY 2027");
+        assert_eq!(dir, -1.0);
+    }
+
+    #[test]
+    fn jump_to_today_is_a_no_op_on_the_current_month() {
+        let now = Instant::now();
+        let mut cal = Calendar::new(&clock_at(2026, 11, 23));
+        cal.jump_to_today(now);
+        assert!(!cal.animating());
+        assert_eq!(cal.view().title, "NOVEMBER 2026");
     }
 
     #[test]

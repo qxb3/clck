@@ -472,6 +472,7 @@ unsafe fn draw_time_page(
 struct CalendarButtons {
     prev: [f32; 4],
     next: [f32; 4],
+    title: [f32; 4],
 }
 
 #[cfg(target_os = "android")]
@@ -619,6 +620,12 @@ unsafe fn draw_calendar_page(
         mid_y - half,
         centers[0] + half,
         mid_y + half,
+    ];
+    buttons.title = [
+        wf * 0.3 + dx,
+        title_baseline - title_px * 0.9,
+        wf * 0.7 + dx,
+        title_baseline + title_px * 0.3,
     ];
     buttons.next = [
         centers[1] - half,
@@ -834,6 +841,8 @@ pub fn android_main(app: AndroidApp) {
     let mut calendar: Option<calendar::Calendar> = None;
     let mut buttons = CalendarButtons::default();
     let mut tap_origin: Option<(f32, f32)> = None;
+    let mut tap_down_at: Option<Instant> = None;
+    const LONG_PRESS: Duration = Duration::from_millis(600);
     let mut dirty = true;
     let mut reassert_awake = false;
     let mut quit = false;
@@ -927,6 +936,7 @@ pub fn android_main(app: AndroidApp) {
                         match motion.action() {
                             MotionAction::Down => {
                                 tap_origin = Some((x, y));
+                                tap_down_at = Some(now);
                                 pager.start_drag(x);
                             }
                             MotionAction::Move => pager.drag_to(x, width),
@@ -936,12 +946,18 @@ pub fn android_main(app: AndroidApp) {
                                     });
                                     if was_tap {
                                         if pager.pos() < -0.98 {
-                                            counter.increment();
+                                            if tap_down_at.is_some_and(|t| now.duration_since(t) >= LONG_PRESS) {
+                                                counter.reset();
+                                            } else {
+                                                counter.increment();
+                                            }
                                         } else if pager.pos() > 0.98 {
                                             if hit(buttons.prev, x, y) {
                                                 cal.shift(-1, now);
                                             } else if hit(buttons.next, x, y) {
                                                 cal.shift(1, now);
+                                            } else if hit(buttons.title, x, y) {
+                                                cal.jump_to_today(now);
                                             }
                                         }
                                     }

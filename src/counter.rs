@@ -15,6 +15,10 @@ impl Counter {
         self.count
     }
 
+    pub fn reset(&mut self) {
+        self.count = 0;
+    }
+
     pub fn increment(&mut self) {
         self.count = self.count.saturating_add(1);
     }
@@ -31,6 +35,15 @@ mod tests {
         counter.increment();
         counter.increment();
         assert_eq!(counter.count(), 2);
+    }
+
+    #[test]
+    fn reset_returns_to_zero() {
+        let mut counter = Counter::new();
+        counter.increment();
+        counter.increment();
+        counter.reset();
+        assert_eq!(counter.count(), 0);
     }
 
     #[test]
