@@ -6,6 +6,7 @@ mod anim;
 mod calendar;
 mod clock;
 mod counter;
+mod hold;
 mod pager;
 
 #[cfg(target_os = "android")]
@@ -635,7 +636,7 @@ unsafe fn draw_calendar_page(
     ];
 }
 
-/// Tap counter: the count, centred, in the clock's colour.
+/// Tap counter: the count, centred, drawn in `color`.
 #[cfg(target_os = "android")]
 unsafe fn draw_counter_page(
     text: &mut text::TextRenderer,
@@ -644,6 +645,7 @@ unsafe fn draw_counter_page(
     wf: f32,
     hf: f32,
     dx: f32,
+    color: [f32; 4],
 ) {
     let px = (hf * 0.44).min(wf * 0.26);
     let tracking = px * 0.02;
@@ -657,12 +659,13 @@ unsafe fn draw_counter_page(
         baseline,
         px,
         tracking,
-        TIME_COLOR,
+        color,
         full,
     );
 }
 
 #[cfg(target_os = "android")]
+#[allow(clippy::too_many_arguments)]
 unsafe fn draw(
     surface: &Surface,
     text: &mut text::TextRenderer,
@@ -672,31 +675,37 @@ unsafe fn draw(
     pos: f32,
     now: Instant,
     buttons: &mut CalendarButtons,
+    wash: Option<hold::Wash>,
 ) -> bool {
     let (w, h) = surface.size();
     if w <= 0 || h <= 0 {
         return false;
     }
     let (wf, hf) = (w as f32, h as f32);
+    let counter_dx = pager::page_offset(-1.0, pos, wf);
 
     text.begin(&surface.gl, w, h, BG);
-    draw_counter_page(
-        text,
-        &surface.gl,
-        counter,
-        wf,
-        hf,
-        pager::page_offset(-1.0, pos, wf),
-    );
-    draw_time_page(
-        text,
-        &surface.gl,
-        anim,
-        wf,
-        hf,
-        pager::page_offset(0.0, pos, wf),
-        now,
-    );
+    draw_counter_page(text, &surface.gl, counter, wf, hf, counter_dx, TIME_COLOR);
+    text.flush(&surface.gl, None);
+
+    // The hold wash covers the counter in white. The count is then redrawn in
+    // black, masked to the same disc, so it stays readable inside the wash.
+    if let (Some(wsh), true) = (wash, pos <= -0.98) {
+        let disc = hold::disc(wsh, wf, hf);
+        text.fill_disc(&surface.gl, w, h, [1.0, 1.0, 1.0, wsh.alpha], disc);
+        draw_counter_page(
+            text,
+            &surface.gl,
+            counter,
+            wf,
+            hf,
+            counter_dx,
+            [0.0, 0.0, 0.0, wsh.alpha],
+        );
+        text.flush(&surface.gl, Some(disc));
+    }
+
+    draw_time_page(text, &surface.gl, anim, wf, hf, pager::page_offset(0.0, pos, wf), now);
     draw_calendar_page(
         text,
         &surface.gl,
@@ -841,8 +850,7 @@ pub fn android_main(app: AndroidApp) {
     let mut calendar: Option<calendar::Calendar> = None;
     let mut buttons = CalendarButtons::default();
     let mut tap_origin: Option<(f32, f32)> = None;
-    let mut tap_down_at: Option<Instant> = None;
-    const LONG_PRESS: Duration = Duration::from_millis(600);
+    let mut hold = hold::Hold::default();
     let mut dirty = true;
     let mut reassert_awake = false;
     let mut quit = false;
@@ -851,7 +859,8 @@ pub fn android_main(app: AndroidApp) {
         // Spend frames only while something is rolling.
         let rolling = pager.animating()
             || clock_anim.as_ref().is_some_and(|a| a.any_active())
-            || calendar.as_ref().is_some_and(|c| c.animating());
+            || calendar.as_ref().is_some_and(|c| c.animating())
+            || hold.active(Instant::now());
         let poll = if rolling {
             Duration::from_millis(16)
         } else {
@@ -936,19 +945,23 @@ pub fn android_main(app: AndroidApp) {
                         match motion.action() {
                             MotionAction::Down => {
                                 tap_origin = Some((x, y));
-                                tap_down_at = Some(now);
+                                if pager.pos() < -0.98 {
+                                    hold.press(now, x, y);
+                                }
                                 pager.start_drag(x);
                             }
-                            MotionAction::Move => pager.drag_to(x, width),
+                            MotionAction::Move => {
+                                pager.drag_to(x, width);
+                                hold.moved(x, y);
+                            }
                             MotionAction::Up => {
+                                    let hold_fired = hold.release();
                                     let was_tap = tap_origin.take().is_some_and(|(sx, sy)| {
                                         (x - sx).abs() < 24.0 && (y - sy).abs() < 24.0 && !pager.was_swipe(width)
                                     });
                                     if was_tap {
                                         if pager.pos() < -0.98 {
-                                            if tap_down_at.is_some_and(|t| now.duration_since(t) >= LONG_PRESS) {
-                                                counter.reset();
-                                            } else {
+                                            if !hold_fired {
                                                 counter.increment();
                                             }
                                         } else if pager.pos() > 0.98 {
@@ -965,6 +978,7 @@ pub fn android_main(app: AndroidApp) {
                             }
                             MotionAction::Cancel => {
                                 tap_origin = None;
+                                hold.cancel();
                                 pager.cancel_drag(now);
                             }
                             _ => {}
@@ -988,6 +1002,14 @@ pub fn android_main(app: AndroidApp) {
             dirty = true;
         }
 
+        let frame_now = Instant::now();
+        if hold.poll(frame_now) {
+            counter.reset();
+            dirty = true;
+        }
+        if hold.active(frame_now) {
+            dirty = true;
+        }
         if !dirty {
             continue;
         }
@@ -1008,7 +1030,7 @@ pub fn android_main(app: AndroidApp) {
             }
 
             if let (Some(s), Some(t)) = (surface.as_ref(), text.as_mut()) {
-                if draw(s, t, cal, anim, &counter, pager.pos(), Instant::now(), &mut buttons) {
+                if draw(s, t, cal, anim, &counter, pager.pos(), Instant::now(), &mut buttons, hold.wash(Instant::now())) {
                     dirty = false;
                     anim.prune(Instant::now());
                     cal.settle(Instant::now());

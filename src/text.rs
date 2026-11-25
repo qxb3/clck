@@ -1,5 +1,6 @@
 //! Minimal GLES3 text renderer: rasterises Iosevka glyphs with `fontdue` into a
-//! single-channel atlas and draws them as textured quads.
+//! single-channel atlas and draws them as textured quads. Also fills solid
+//! discs, used for the counter's hold wash.
 
 use std::collections::HashMap;
 
@@ -30,6 +31,8 @@ void main() {
 const FRAG_SRC: &str = r#"#version 300 es
 precision mediump float;
 uniform sampler2D u_atlas;
+uniform highp vec4 u_disc;
+uniform bool u_use_disc;
 uniform highp vec2 u_res;
 in vec2 v_uv;
 in vec4 v_color;
@@ -42,7 +45,24 @@ void main() {
         discard;
     }
     float coverage = texture(u_atlas, v_uv).r;
+    if (u_use_disc) {
+        coverage *= 1.0 - smoothstep(u_disc.z - u_disc.w, u_disc.z, distance(px, u_disc.xy));
+    }
     frag_color = vec4(v_color.rgb, v_color.a * coverage);
+}
+"#;
+
+/// Solid disc: colour masked by a radial falloff, `u_disc` = `[cx, cy, radius, feather]`.
+const FILL_FRAG_SRC: &str = r#"#version 300 es
+precision mediump float;
+uniform highp vec2 u_res;
+uniform highp vec4 u_disc;
+in vec4 v_color;
+out vec4 frag_color;
+void main() {
+    vec2 px = vec2(gl_FragCoord.x, u_res.y - gl_FragCoord.y);
+    float mask = 1.0 - smoothstep(u_disc.z - u_disc.w, u_disc.z, distance(px, u_disc.xy));
+    frag_color = vec4(v_color.rgb, v_color.a * mask);
 }
 "#;
 
@@ -97,6 +117,11 @@ pub struct TextRenderer {
     vbo: glow::Buffer,
     u_res: glow::UniformLocation,
     u_atlas: glow::UniformLocation,
+    u_disc: glow::UniformLocation,
+    u_use_disc: glow::UniformLocation,
+    fill_program: glow::Program,
+    fill_u_res: glow::UniformLocation,
+    fill_u_disc: glow::UniformLocation,
     vertices: Vec<f32>,
 }
 
@@ -105,7 +130,8 @@ impl TextRenderer {
         let font = Font::from_bytes(font_bytes, FontSettings::default())
             .expect("failed to parse embedded Iosevka font");
 
-        let program = link_program(gl);
+        let program = link_program(gl, VERT_SRC, FRAG_SRC);
+        let fill_program = link_program(gl, VERT_SRC, FILL_FRAG_SRC);
         let vao = gl.create_vertex_array().expect("vao");
         let vbo = gl.create_buffer().expect("vbo");
         gl.bind_vertex_array(Some(vao));
@@ -161,6 +187,16 @@ impl TextRenderer {
         let u_atlas = gl
             .get_uniform_location(program, "u_atlas")
             .expect("u_atlas");
+        let u_disc = gl.get_uniform_location(program, "u_disc").expect("u_disc");
+        let u_use_disc = gl
+            .get_uniform_location(program, "u_use_disc")
+            .expect("u_use_disc");
+        let fill_u_res = gl
+            .get_uniform_location(fill_program, "u_res")
+            .expect("fill u_res");
+        let fill_u_disc = gl
+            .get_uniform_location(fill_program, "u_disc")
+            .expect("fill u_disc");
 
         Self {
             font,
@@ -176,6 +212,11 @@ impl TextRenderer {
             vbo,
             u_res,
             u_atlas,
+            u_disc,
+            u_use_disc,
+            fill_program,
+            fill_u_res,
+            fill_u_disc,
             vertices: Vec::new(),
         }
     }
@@ -267,8 +308,14 @@ impl TextRenderer {
         glyph.advance
     }
 
-    /// Uploads the batch and draws it.
-    pub unsafe fn end(&mut self, gl: &glow::Context) {
+    /// Uploads the batch and draws it, optionally through a radial mask
+    /// `[cx, cy, radius, feather]` in top-left-origin pixels.
+    pub unsafe fn flush(&mut self, gl: &glow::Context, disc: Option<[f32; 4]>) {
+        gl.use_program(Some(self.program));
+        gl.uniform_1_i32(Some(&self.u_use_disc), i32::from(disc.is_some()));
+        if let Some(d) = disc {
+            gl.uniform_4_f32(Some(&self.u_disc), d[0], d[1], d[2], d[3]);
+        }
         if !self.vertices.is_empty() {
             let bytes: &[u8] = std::slice::from_raw_parts(
                 self.vertices.as_ptr() as *const u8,
@@ -276,7 +323,47 @@ impl TextRenderer {
             );
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes, glow::STREAM_DRAW);
             gl.draw_arrays(glow::TRIANGLES, 0, (self.vertices.len() / 12) as i32);
+            self.vertices.clear();
         }
+    }
+
+    /// Fills the whole window with `color`, faded by the radial `disc`
+    /// (`[cx, cy, radius, feather]`, top-left-origin pixels).
+    pub unsafe fn fill_disc(
+        &mut self,
+        gl: &glow::Context,
+        width: i32,
+        height: i32,
+        color: [f32; 4],
+        disc: [f32; 4],
+    ) {
+        let (w, h) = (width as f32, height as f32);
+        let corners = [(0.0, 0.0), (0.0, h), (w, 0.0), (w, 0.0), (0.0, h), (w, h)];
+        let clip = [0.0, 0.0, w, h];
+        let mut verts: Vec<f32> = Vec::with_capacity(6 * 12);
+        for (x, y) in corners {
+            verts.extend_from_slice(&[
+                x, y, 0.0, 0.0, color[0], color[1], color[2], color[3], clip[0], clip[1], clip[2],
+                clip[3],
+            ]);
+        }
+
+        gl.use_program(Some(self.fill_program));
+        gl.bind_vertex_array(Some(self.vao));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
+        gl.uniform_2_f32(Some(&self.fill_u_res), w, h);
+        gl.uniform_4_f32(Some(&self.fill_u_disc), disc[0], disc[1], disc[2], disc[3]);
+        let bytes: &[u8] = std::slice::from_raw_parts(
+            verts.as_ptr() as *const u8,
+            verts.len() * std::mem::size_of::<f32>(),
+        );
+        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes, glow::STREAM_DRAW);
+        gl.draw_arrays(glow::TRIANGLES, 0, 6);
+    }
+
+    /// Draws any pending text and unbinds the batch.
+    pub unsafe fn end(&mut self, gl: &glow::Context) {
+        self.flush(gl, None);
         gl.bind_vertex_array(None);
     }
 
@@ -381,11 +468,11 @@ impl TextRenderer {
     }
 }
 
-unsafe fn link_program(gl: &glow::Context) -> glow::Program {
+unsafe fn link_program(gl: &glow::Context, vert: &str, frag: &str) -> glow::Program {
     let vs = gl
         .create_shader(glow::VERTEX_SHADER)
         .expect("vertex shader");
-    gl.shader_source(vs, VERT_SRC);
+    gl.shader_source(vs, vert);
     gl.compile_shader(vs);
     if !gl.get_shader_compile_status(vs) {
         panic!("vertex shader: {}", gl.get_shader_info_log(vs));
@@ -394,7 +481,7 @@ unsafe fn link_program(gl: &glow::Context) -> glow::Program {
     let fs = gl
         .create_shader(glow::FRAGMENT_SHADER)
         .expect("fragment shader");
-    gl.shader_source(fs, FRAG_SRC);
+    gl.shader_source(fs, frag);
     gl.compile_shader(fs);
     if !gl.get_shader_compile_status(fs) {
         panic!("fragment shader: {}", gl.get_shader_info_log(fs));
