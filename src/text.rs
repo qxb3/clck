@@ -123,6 +123,7 @@ pub struct TextRenderer {
     fill_u_res: glow::UniformLocation,
     fill_u_disc: glow::UniformLocation,
     vertices: Vec<f32>,
+    solid_uv: [f32; 2],
 }
 
 impl TextRenderer {
@@ -198,14 +199,35 @@ impl TextRenderer {
             .get_uniform_location(fill_program, "u_disc")
             .expect("fill u_disc");
 
+        // A small opaque block in the atlas lets solid rectangles share the
+        // glyph batch and pipeline.
+        let mut packer = Packer {
+            x: 0,
+            y: 0,
+            row_height: 0,
+        };
+        let (sx, sy) = packer.alloc(2, 2).expect("atlas space for solid block");
+        gl.tex_sub_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            sx as i32,
+            sy as i32,
+            2,
+            2,
+            glow::RED,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(Some(&[255u8; 4])),
+        );
+        let solid_uv = [
+            (sx as f32 + 1.0) / ATLAS_SIZE as f32,
+            (sy as f32 + 1.0) / ATLAS_SIZE as f32,
+        ];
+
         Self {
             font,
             glyphs: HashMap::new(),
-            packer: Packer {
-                x: 0,
-                y: 0,
-                row_height: 0,
-            },
+            packer,
+            solid_uv,
             texture,
             program,
             vao,
@@ -359,6 +381,35 @@ impl TextRenderer {
         );
         gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes, glow::STREAM_DRAW);
         gl.draw_arrays(glow::TRIANGLES, 0, 6);
+    }
+
+    /// Queues a solid rectangle, drawn with the rest of the batch.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn fill_rect(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: [f32; 4],
+        clip: [f32; 4],
+    ) {
+        if width <= 0.0 || height <= 0.0 {
+            return;
+        }
+        let [u, v] = self.solid_uv;
+        let block = Glyph {
+            u0: u,
+            v0: v,
+            u1: u,
+            v1: v,
+            width,
+            height,
+            left: 0.0,
+            above_baseline: 0.0,
+            advance: 0.0,
+        };
+        self.push_quad(x, y, &block, color, clip);
     }
 
     /// Draws any pending text and unbinds the batch.

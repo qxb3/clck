@@ -1,7 +1,8 @@
 //! Hold-to-reset gesture for the counter page.
 //!
 //! Pressing and holding the counter fills the page with a white wash that grows
-//! outward from the finger. When the hold reaches [`THRESHOLD`] the count resets,
+//! outward from the finger, starting only after [`SHOW_AFTER`] so quick taps
+//! show nothing. When the hold reaches [`THRESHOLD`] the count resets,
 //! the wash is full, and it then fades back to the plain background. Lifting the
 //! finger before the threshold, or moving it past [`SLOP_PX`], is not a reset.
 
@@ -9,6 +10,9 @@ use std::time::{Duration, Instant};
 
 /// How long a finger must rest on the counter before it resets.
 pub const THRESHOLD: Duration = Duration::from_millis(600);
+/// How long the finger must rest before the wash first appears. The wash then
+/// grows from nothing and still fills the page exactly at [`THRESHOLD`].
+pub const SHOW_AFTER: Duration = Duration::from_millis(200);
 /// Finger travel, in pixels, past which a press is a drag rather than a hold or tap.
 pub const SLOP_PX: f32 = 24.0;
 /// How long the page stays fully washed after the reset, before fading.
@@ -100,7 +104,9 @@ impl Hold {
         }
 
         let start = self.pressed?;
-        let progress = (now.duration_since(start).as_secs_f32() / THRESHOLD.as_secs_f32())
+        let grow = (THRESHOLD - SHOW_AFTER).as_secs_f32();
+        let progress = ((now.duration_since(start).as_secs_f32() - SHOW_AFTER.as_secs_f32())
+            / grow)
             .clamp(0.0, 1.0);
         (progress > 0.0).then_some(Wash {
             centre: self.origin,
@@ -184,7 +190,9 @@ mod tests {
         let mut hold = Hold::default();
         hold.press(t0, 40.0, 60.0);
         assert!(hold.wash(t0).is_none());
-        let half = hold.wash(t0 + THRESHOLD / 2).unwrap();
+        assert!(hold.wash(t0 + SHOW_AFTER).is_none(), "nothing shows before the delay");
+        let mid = SHOW_AFTER + (THRESHOLD - SHOW_AFTER) / 2;
+        let half = hold.wash(t0 + mid).unwrap();
         assert!((half.extent - 0.5).abs() < 1e-3);
         assert_eq!(half.alpha, 1.0);
         assert_eq!(half.centre, [40.0, 60.0]);

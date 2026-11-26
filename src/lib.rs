@@ -3,6 +3,7 @@
 //! `~/.config/kitty/theme.conf`.
 
 mod anim;
+mod battery;
 mod calendar;
 mod clock;
 mod counter;
@@ -39,6 +40,9 @@ const PERIOD_COLOR: [f32; 4] = [0.373, 0.529, 0.529, 1.0]; // #5f8787
 const DATE_COLOR: [f32; 4] = [0.549, 0.498, 0.439, 1.0]; // #8c7f70
 #[cfg(target_os = "android")]
 const DAY_COLOR: [f32; 4] = [0.6, 0.6, 0.6, 1.0]; // #999999
+
+#[cfg(target_os = "android")]
+const LOW_COLOR: [f32; 4] = [0.7, 0.3, 0.3, 1.0];
 
 #[cfg(target_os = "android")]
 const WEEKDAY_INITIALS: [&str; 7] = ["M", "T", "W", "T", "F", "S", "S"];
@@ -368,6 +372,7 @@ unsafe fn draw_time_page(
     hf: f32,
     dx: f32,
     now: Instant,
+    battery: Option<battery::Battery>,
 ) {
     // Time, sized to the shorter edge of the landscape window.
     let px = (hf * 0.44).min(wf * 0.26);
@@ -464,6 +469,47 @@ unsafe fn draw_time_page(
         date_clip,
         now,
     );
+
+    // Battery: an outlined cell whose fill tracks the level, flush against
+    // the top-right corner with no margin.
+    if let Some(b) = battery {
+        let color = if b.charging {
+            PERIOD_COLOR
+        } else if b.percent <= 15 {
+            LOW_COLOR
+        } else {
+            DATE_COLOR
+        };
+        let full = [0.0, 0.0, wf, hf];
+        let bat_h = (hf * 0.028).clamp(10.0, 26.0).round();
+        let bat_w = (bat_h * 2.0).round();
+        let t = (bat_h * 0.12).round().max(1.0);
+        let nub_w = t.max(2.0);
+        let nub_h = (bat_h * 0.4).round();
+        let x = (wf + dx - bat_w).round();
+        let y = 0.0;
+
+        // Outline.
+        text.fill_rect(x, y, bat_w, t, color, full);
+        text.fill_rect(x, y + bat_h - t, bat_w, t, color, full);
+        text.fill_rect(x, y, t, bat_h, color, full);
+        text.fill_rect(x + bat_w - t, y, t, bat_h, color, full);
+        // Terminal nub on the left, so the right edge stays flush.
+        text.fill_rect(x - nub_w, y + (bat_h - nub_h) * 0.5, nub_w, nub_h, color, full);
+        // Level fill, inset by one outline width of gap.
+        let inset = t * 2.0;
+        let inner_w = bat_w - inset * 2.0;
+        let level = (b.percent as f32 / 100.0).clamp(0.0, 1.0);
+        let fill_w = (inner_w * level).round();
+        text.fill_rect(
+            x + bat_w - inset - fill_w,
+            y + inset,
+            fill_w,
+            bat_h - inset * 2.0,
+            color,
+            full,
+        );
+    }
 }
 
 /// Minimal month grid: month/year header, weekday initials, then the days.
@@ -676,6 +722,7 @@ unsafe fn draw(
     now: Instant,
     buttons: &mut CalendarButtons,
     wash: Option<hold::Wash>,
+    battery: Option<battery::Battery>,
 ) -> bool {
     let (w, h) = surface.size();
     if w <= 0 || h <= 0 {
@@ -705,7 +752,16 @@ unsafe fn draw(
         text.flush(&surface.gl, Some(disc));
     }
 
-    draw_time_page(text, &surface.gl, anim, wf, hf, pager::page_offset(0.0, pos, wf), now);
+    draw_time_page(
+        text,
+        &surface.gl,
+        anim,
+        wf,
+        hf,
+        pager::page_offset(0.0, pos, wf),
+        now,
+        battery,
+    );
     draw_calendar_page(
         text,
         &surface.gl,
@@ -851,6 +907,8 @@ pub fn android_main(app: AndroidApp) {
     let mut buttons = CalendarButtons::default();
     let mut tap_origin: Option<(f32, f32)> = None;
     let mut hold = hold::Hold::default();
+    let mut battery_state: Option<battery::Battery> = None;
+    let mut last_battery_poll: Option<Instant> = None;
     let mut dirty = true;
     let mut reassert_awake = false;
     let mut quit = false;
@@ -1002,6 +1060,16 @@ pub fn android_main(app: AndroidApp) {
             dirty = true;
         }
 
+        // The battery only needs checking now and then.
+        if last_battery_poll.is_none_or(|t| t.elapsed() >= Duration::from_secs(30)) {
+            last_battery_poll = Some(Instant::now());
+            let latest = battery::query(&app);
+            if latest != battery_state {
+                battery_state = latest;
+                dirty = true;
+            }
+        }
+
         let frame_now = Instant::now();
         if hold.poll(frame_now) {
             counter.reset();
@@ -1030,7 +1098,7 @@ pub fn android_main(app: AndroidApp) {
             }
 
             if let (Some(s), Some(t)) = (surface.as_ref(), text.as_mut()) {
-                if draw(s, t, cal, anim, &counter, pager.pos(), Instant::now(), &mut buttons, hold.wash(Instant::now())) {
+                if draw(s, t, cal, anim, &counter, pager.pos(), Instant::now(), &mut buttons, hold.wash(Instant::now()), battery_state) {
                     dirty = false;
                     anim.prune(Instant::now());
                     cal.settle(Instant::now());
